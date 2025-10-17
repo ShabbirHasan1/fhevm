@@ -10,9 +10,10 @@ use alloy::{
         PendingTransactionBuilder,
     },
     rpc::types::TransactionRequest,
-    transports::TransportResult,
+    transports::{RpcError, TransportResult},
 };
 use futures_util::lock::Mutex;
+use tracing::{error, warn};
 
 pub type FillersWithoutNonceManagement =
     JoinFill<GasFiller, JoinFill<BlobGasFiller, ChainIdFiller>>;
@@ -28,6 +29,7 @@ where
     provider: P,
     nonce_manager: Arc<Mutex<CachedNonceManager>>,
     signer_address: Option<Address>,
+    retry_immediately_on_nonce_issue: u64,
 }
 
 impl<P: alloy::providers::Provider<Ethereum> + Clone + 'static> NonceManagedProvider<P> {
@@ -36,6 +38,20 @@ impl<P: alloy::providers::Provider<Ethereum> + Clone + 'static> NonceManagedProv
             provider,
             nonce_manager: Default::default(),
             signer_address,
+            retry_immediately_on_nonce_issue: 0,
+        }
+    }
+
+    pub fn new_with_nonce_retry(
+        provider: P,
+        signer_address: Option<Address>,
+        retry_immediately_on_nonce_issue: u64,
+    ) -> Self {
+        Self {
+            provider,
+            nonce_manager: Default::default(),
+            signer_address,
+            retry_immediately_on_nonce_issue,
         }
     }
 
@@ -43,19 +59,37 @@ impl<P: alloy::providers::Provider<Ethereum> + Clone + 'static> NonceManagedProv
         &self,
         tx: impl Into<TransactionRequest>,
     ) -> TransportResult<PendingTransactionBuilder<Ethereum>> {
-        let mut tx = tx.into();
-        if let Some(signer_address) = self.signer_address {
-            let nonce_manager = self.nonce_manager.lock().await;
-            let nonce = nonce_manager
-                .get_next_nonce(&self.provider, signer_address)
-                .await?;
-            tx.nonce = Some(nonce);
+        let mut res = Err(RpcError::UnsupportedFeature("Not reachable"));
+        // res cannot be returned non initialized
+        let tx_req = tx.into();
+        for _ in 0..=self.retry_immediately_on_nonce_issue {
+            let mut tx: TransactionRequest = tx_req.clone();
+            if let Some(signer_address) = self.signer_address {
+                let nonce_manager = self.nonce_manager.lock().await;
+                let nonce = nonce_manager
+                    .get_next_nonce(&self.provider, signer_address)
+                    .await?;
+                tx.nonce = Some(nonce);
+            }
+            res = self.provider.send_transaction(tx).await;
+            if let Err(err) = &res {
+                // Reset the nonce manager if the transaction sending failed.
+                *self.nonce_manager.lock().await = Default::default();
+                if let RpcError::ErrorResp(err) = err {
+                    // server returned an error response: error code -32003: Nonce too high err
+                    if err.code == -32003
+                        && (err.message.contains("Nonce") || err.message.contains("nonce"))
+                    {
+                        let msg = err.message.to_string();
+                        warn!(msg, "Transaction failed due to nonce, resetting nonce manager and retrying immediately");
+                        continue;
+                    }
+                }
+                warn!("Transaction failed, resetting nonce manager");
+            }
+            return res;
         }
-        let res = self.provider.send_transaction(tx).await;
-        if res.is_err() {
-            // Reset the nonce manager if the transaction sending failed.
-            *self.nonce_manager.lock().await = Default::default();
-        }
+        error!("Transaction failed multiple time due to nonce, aborting");
         res
     }
 
