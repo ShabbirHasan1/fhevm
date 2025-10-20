@@ -68,6 +68,7 @@ pub struct TxNode {
     pub results: Vec<Handle>,
     pub transaction_id: Handle,
     pub is_uncomputable: bool,
+    pub component_id: usize,
 }
 
 pub fn build_component_nodes(
@@ -116,15 +117,21 @@ pub fn build_component_nodes(
         for i in node.df_nodes.iter() {
             component_ops.push(std::mem::take(&mut operations[i.index()]));
         }
-        component.build(component_ops, transaction_id)?;
+        component.build(component_ops, transaction_id, idx)?;
         components.push(component);
     }
     Ok(components)
 }
 
 impl TxNode {
-    pub fn build(&mut self, mut operations: Vec<DFGOp>, transaction_id: &Handle) -> Result<()> {
+    pub fn build(
+        &mut self,
+        mut operations: Vec<DFGOp>,
+        transaction_id: &Handle,
+        component_id: usize,
+    ) -> Result<()> {
         self.transaction_id = transaction_id.clone();
+        self.component_id = component_id;
         self.is_uncomputable = false;
         // Gather all handles produced within the transaction
         let mut produced_handles: HashMap<Handle, usize> = HashMap::new();

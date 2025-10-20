@@ -203,6 +203,7 @@ impl<'a> Scheduler<'a> {
                         std::mem::take(&mut tx.graph),
                         std::mem::take(&mut tx.inputs),
                         tx.transaction_id.clone(),
+                        tx.component_id,
                     ));
                 }
                 let (sks, cpk) = self.get_keys(DeviceSelection::RoundRobin)?;
@@ -249,6 +250,7 @@ impl<'a> Scheduler<'a> {
                             std::mem::take(&mut tx.graph),
                             std::mem::take(&mut tx.inputs),
                             tx.transaction_id.clone(),
+                            tx.component_id,
                         ));
                     }
                     let (sks, cpk) = self.get_keys(DeviceSelection::RoundRobin)?;
@@ -266,12 +268,13 @@ impl<'a> Scheduler<'a> {
 fn re_randomise_transaction_inputs(
     inputs: &mut HashMap<Handle, Option<DFGTxInput>>,
     transaction_id: &Handle,
+    component_id: usize,
     gpu_idx: usize,
     cpk: tfhe::CompactPublicKey,
 ) -> Result<()> {
     let mut re_rand_context = ReRandomizationContext::new(
         TRANSACTION_RERANDOMISATION_DOMAIN_SEPARATOR,
-        [transaction_id.as_slice()],
+        [transaction_id.as_slice(), &component_id.to_be_bytes()],
         COMPACT_PUBLIC_ENCRYPTION_DOMAIN_SEPARATOR,
     );
     for txinput in inputs.values_mut() {
@@ -336,7 +339,7 @@ fn decompress_transaction_inputs(
 }
 
 fn execute_partition(
-    transactions: Vec<(DFGraph, HashMap<Handle, Option<DFGTxInput>>, Handle)>,
+    transactions: Vec<(DFGraph, HashMap<Handle, Option<DFGTxInput>>, Handle, usize)>,
     task_id: NodeIndex,
     gpu_idx: usize,
     #[cfg(not(feature = "gpu"))] sks: tfhe::ServerKey,
@@ -348,7 +351,7 @@ fn execute_partition(
     let tracer = opentelemetry::global::tracer("tfhe_worker");
     // Traverse transactions within the partition. The transactions
     // are topologically sorted so the order is executable
-    'tx: for (ref mut dfg, ref mut tx_inputs, tid) in transactions {
+    'tx: for (ref mut dfg, ref mut tx_inputs, tid, cid) in transactions {
         tfhe::set_server_key(sks.clone());
         // Update the transaction inputs based on allowed handles so
         // far. If any input is still missing, and we cannot fill it
@@ -384,7 +387,9 @@ fn execute_partition(
             let started_at = std::time::Instant::now();
             // Re-randomise inputs of the transaction - this also
             // decompresses ciphertexts
-            if let Err(e) = re_randomise_transaction_inputs(tx_inputs, &tid, gpu_idx, cpk.clone()) {
+            if let Err(e) =
+                re_randomise_transaction_inputs(tx_inputs, &tid, cid, gpu_idx, cpk.clone())
+            {
                 error!(target: "scheduler", {transaction_id = ?tid, error = ?e },
 		       "Error while re-randomising inputs");
                 for nidx in dfg.graph.node_identifiers() {
@@ -457,7 +462,7 @@ fn execute_partition(
                 error!(target: "scheduler", {index = ?nidx.index() }, "Wrong dataflow graph index");
                 continue;
             };
-            let result = try_schedule_node(node, nidx.index(), tx_inputs, gpu_idx, sks.clone());
+            let result = try_execute_node(node, nidx.index(), tx_inputs, gpu_idx, sks.clone());
             if let Ok(result) = result {
                 let nidx = NodeIndex::new(result.0);
                 if result.1.is_ok() {
@@ -503,7 +508,7 @@ fn execute_partition(
     (res, task_id)
 }
 
-fn try_schedule_node(
+fn try_execute_node(
     node: &mut OpNode,
     node_index: usize,
     tx_inputs: &mut HashMap<Handle, Option<DFGTxInput>>,
