@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     sync::{Arc, OnceLock, RwLock},
     time::Duration,
 };
@@ -14,16 +13,11 @@ use alloy::{
 };
 
 use async_trait::async_trait;
-use aws_sdk_s3::operation::get_object::{GetObjectError, GetObjectOutput};
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::Client;
-use aws_smithy_mocks::RuleMode;
-use aws_smithy_mocks::{mock, mock_client};
-
+use aws_sdk_s3::{operation::get_object::GetObjectError, Client};
 use gw_listener::{
-    aws_s3::{find_key, AwsS3Client, AwsS3Interface},
-    gw_listener::{key_id_to_aws_key, to_key_prefix, GatewayListener},
-    ConfigSettings, KeyType,
+    aws_s3::{AwsS3Client, AwsS3Interface},
+    gw_listener::{key_id_to_key_bucket, to_bucket_key_prefix, GatewayListener},
+    ConfigSettings,
 };
 use serial_test::serial;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
@@ -338,16 +332,15 @@ pub struct AwsS3ClientMocked(Client);
 impl AwsS3Interface for AwsS3ClientMocked {
     async fn get_bucket_key(
         &self,
-        url: &str,
+        _url: &str,
         bucket: &str,
         key: &str,
     ) -> anyhow::Result<bytes::Bytes> {
-        let full_key = find_key(&self.0, url, bucket, key).await?;
         Ok(self
             .0
             .get_object()
             .bucket(bucket)
-            .key(full_key)
+            .key(key)
             .send()
             .await?
             .body
@@ -357,52 +350,50 @@ impl AwsS3Interface for AwsS3ClientMocked {
     }
 }
 
-fn rules(
-    buckets: Vec<&'static str>,
-    keys_digests: Vec<KeyType>,
-    key_id: U256,
-    bad_content: bool,
-    bad_key: bool,
-) -> Vec<aws_smithy_mocks::Rule> {
+// test bad bucket
+// test bad key
+#[tokio::test]
+#[serial(db)]
+async fn keygen_ok() -> anyhow::Result<()> {
+    use aws_sdk_s3::operation::get_object::GetObjectOutput;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_sdk_s3::Client;
+    use aws_smithy_mocks::RuleMode;
+    use aws_smithy_mocks::{mock, mock_client};
+    use gw_listener::KeyType;
+
+    // see ../contracts/KMSGeneration.sol
+    let buckets = [
+        "test-bucket1/PUB-P1",
+        "test-bucket2/PUB-P2",
+        "test-bucket3/PUB-P3",
+        "test-bucket4/PUB-P4",
+    ];
+
+    let keys_digests = [KeyType::PublicKey, KeyType::ServerKey];
+
+    let key_id = U256::from(16);
+
     let mut rules = vec![];
-    let mut keys = HashSet::<String>::new();
-    for (i, &bucket) in buckets.iter().enumerate() {
+    for &bucket in &buckets {
         for key_type in &keys_digests {
-            let key_type_str: &str = to_key_prefix(*key_type);
-            let key_id_no_0x = key_id_to_aws_key(key_id);
-            // mpc style PUB-p1
-            let key = format!("PUB-p1{}/{}", key_type_str, key_id_no_0x);
-            keys.insert(key.clone());
+            let key_type_str: &str = to_bucket_key_prefix(*key_type);
+            let key_id_no_0x = key_id_to_key_bucket(key_id);
+            let key = format!("{}/{}", key_type_str, key_id_no_0x);
             eprintln!("Adding {}/{}", bucket, key);
             let get_object_rule = mock!(Client::get_object)
-                .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key));
-            let get_object_rule = if bad_key && i < 3 {
-                // most bucket fails
-                get_object_rule.then_error(|| {
-                    let nsk = aws_sdk_s3::types::error::NoSuchKey::builder()
-                        .message("")
-                        .build();
-                    GetObjectError::NoSuchKey(nsk)
-                })
-            } else {
-                get_object_rule.then_output(move || {
+                .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key))
+                .then_output(|| {
                     GetObjectOutput::builder()
-                        .body(ByteStream::from_static(if bad_content {
-                            b"bad_key_bytes"
-                        } else {
-                            b"key_bytes"
-                        }))
+                        .body(ByteStream::from_static(b"key_bytes"))
                         .build()
-                })
-            };
+                });
             rules.push(get_object_rule);
         }
     }
     for &bucket in &buckets {
         let key_id_no_0x = &format!("{key_id:064X}");
-        // centralized style PUB-p1
         let key = format!("PUB/CRS/{key_id_no_0x}");
-        keys.insert(key.clone());
         eprintln!("Adding {}/{}", bucket, key);
         let get_object_rule = mock!(Client::get_object)
             .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key))
@@ -413,42 +404,7 @@ fn rules(
             });
         rules.push(get_object_rule);
     }
-
-    for &bucket in &buckets {
-        let keys = keys.clone();
-        let get_object_rule = mock!(Client::list_objects_v2)
-            .match_requests(|req| req.bucket() == Some(bucket))
-            .then_output(move || {
-                aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output::builder()
-                    .set_contents(
-                        keys.iter()
-                            .map(move |k| Some(aws_sdk_s3::types::Object::builder().key(k).build()))
-                            .collect(),
-                    )
-                    .build()
-            });
-        rules.push(get_object_rule);
-    }
-    rules
-}
-
-#[tokio::test]
-#[serial(db)]
-async fn keygen_ok_simple() -> anyhow::Result<()> {
-    use aws_smithy_mocks::mock_client;
-    // see ../contracts/KMSGeneration.sol
-    let buckets = vec![
-        "test-bucket1",
-        "test-bucket2",
-        "test-bucket3",
-        "test-bucket4",
-    ];
-
-    let keys_digests = vec![KeyType::PublicKey, KeyType::ServerKey];
-
-    let key_id = U256::from(16);
-
-    let rules_ref: Vec<_> = rules(buckets, keys_digests, key_id, false, false);
+    let rules_ref: Vec<_> = rules.iter().collect();
 
     // Create a mocked client with the rule
     let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, &rules_ref);
@@ -516,19 +472,56 @@ async fn keygen_ok_catchup_negative() -> anyhow::Result<()> {
 }
 
 async fn keygen_ok_catchup_gen(positive: bool) -> anyhow::Result<()> {
+    use aws_sdk_s3::operation::get_object::GetObjectOutput;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_sdk_s3::Client;
+    use aws_smithy_mocks::RuleMode;
+    use aws_smithy_mocks::{mock, mock_client};
+    use gw_listener::KeyType;
+
     // see ../contracts/KMSGeneration.sol
-    let buckets = vec![
-        "test-bucket1",
-        "test-bucket2",
-        "test-bucket3",
-        "test-bucket4",
+    let buckets = [
+        "test-bucket1/PUB-P1",
+        "test-bucket2/PUB-P2",
+        "test-bucket3/PUB-P3",
+        "test-bucket4/PUB-P4",
     ];
 
-    let keys_digests = vec![KeyType::PublicKey, KeyType::ServerKey];
+    let keys_digests = [KeyType::PublicKey, KeyType::ServerKey];
 
     let key_id = U256::from(16);
 
-    let rules_ref: Vec<_> = rules(buckets, keys_digests, key_id, false, false);
+    let mut rules = vec![];
+    for &bucket in &buckets {
+        for key_type in &keys_digests {
+            let key_type_str: &str = to_bucket_key_prefix(*key_type);
+            let key_id_no_0x = key_id_to_key_bucket(key_id);
+            let key = format!("{}/{}", key_type_str, key_id_no_0x);
+            eprintln!("Adding {}/{}", bucket, key);
+            let get_object_rule = mock!(Client::get_object)
+                .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key))
+                .then_output(|| {
+                    GetObjectOutput::builder()
+                        .body(ByteStream::from_static(b"key_bytes"))
+                        .build()
+                });
+            rules.push(get_object_rule);
+        }
+    }
+    for &bucket in &buckets {
+        let key_id_no_0x = &format!("{key_id:064X}");
+        let key = format!("PUB/CRS/{key_id_no_0x}");
+        eprintln!("Adding {}/{}", bucket, key);
+        let get_object_rule = mock!(Client::get_object)
+            .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key))
+            .then_output(|| {
+                GetObjectOutput::builder()
+                    .body(ByteStream::from_static(b"key_bytes"))
+                    .build()
+            });
+        rules.push(get_object_rule);
+    }
+    let rules_ref: Vec<_> = rules.iter().collect();
 
     // Create a mocked client with the rule
     let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, &rules_ref);
@@ -598,19 +591,43 @@ async fn keygen_ok_catchup_gen(positive: bool) -> anyhow::Result<()> {
 #[tokio::test]
 #[serial(db)]
 async fn keygen_compromised_key() -> anyhow::Result<()> {
+    use aws_sdk_s3::operation::get_object::GetObjectOutput;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_sdk_s3::Client;
+    use aws_smithy_mocks::RuleMode;
+    use aws_smithy_mocks::{mock, mock_client};
+    use gw_listener::KeyType;
+
     // see ../contracts/KMSGeneration.sol
-    let buckets = vec![
-        "test-bucket1",
-        "test-bucket2",
-        "test-bucket3",
-        "test-bucket4",
+    let buckets = [
+        "test-bucket1/PUB-P1",
+        "test-bucket2/PUB-P2",
+        "test-bucket3/PUB-P3",
+        "test-bucket4/PUB-P4",
     ];
 
-    let keys_digests = vec![KeyType::PublicKey, KeyType::ServerKey];
+    let keys_digests = [KeyType::PublicKey, KeyType::ServerKey];
 
     let key_id = U256::from(16);
 
-    let rules_ref: Vec<_> = rules(buckets, keys_digests, key_id, true, false);
+    let mut rules = vec![];
+    for bucket in buckets {
+        for key_type in &keys_digests {
+            let key_type_str: &str = to_bucket_key_prefix(*key_type);
+            let key_id_no_0x = key_id_to_key_bucket(key_id);
+            let key = format!("{}/{}", key_type_str, key_id_no_0x);
+            eprintln!("Adding {}/{}", bucket, key);
+            let get_object_rule = mock!(Client::get_object)
+                .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key))
+                .then_output(|| {
+                    GetObjectOutput::builder()
+                        .body(ByteStream::from_static(b"bad_key_bytes"))
+                        .build()
+                });
+            rules.push(get_object_rule);
+        }
+    }
+    let rules_ref: Vec<_> = rules.iter().collect();
 
     // Create a mocked client with the rule
     let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, &rules_ref);
@@ -658,19 +675,53 @@ async fn keygen_compromised_key() -> anyhow::Result<()> {
 #[tokio::test]
 #[serial(db)]
 async fn keygen_bad_key_or_bucket() -> anyhow::Result<()> {
+    use aws_sdk_s3::operation::get_object::GetObjectOutput;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_sdk_s3::Client;
+    use aws_smithy_mocks::RuleMode;
+    use aws_smithy_mocks::{mock, mock_client};
+    use gw_listener::KeyType;
+
     // see ../contracts/KMSGeneration.sol
-    let buckets = vec![
-        "test-bucket1",
-        "test-bucket2",
-        "test-bucket3",
-        "test-bucket4",
+    let buckets = [
+        "test-bucket1/PUB-P1",
+        "test-bucket2/PUB-P2",
+        "test-bucket3/PUB-P3",
+        "test-bucket4/PUB-P4",
     ];
 
-    let keys_digests = vec![KeyType::PublicKey, KeyType::ServerKey];
+    let keys_digests = [KeyType::PublicKey, KeyType::ServerKey];
 
     let key_id = U256::from(16);
 
-    let rules_ref: Vec<_> = rules(buckets, keys_digests, key_id, false, true);
+    let mut rules = vec![];
+    for (i, bucket) in buckets.iter().copied().enumerate() {
+        for key_type in &keys_digests {
+            let key_type_str: &str = to_bucket_key_prefix(*key_type);
+            let key_id_no_0x = key_id_to_key_bucket(key_id);
+            let key = format!("{}/{}", key_type_str, key_id_no_0x);
+            eprintln!("Adding {}/{}", bucket, key);
+            let get_object_rule = mock!(Client::get_object)
+                .match_requests(move |req| req.bucket() == Some(bucket) && req.key() == Some(&key));
+            let get_object_rule = if i < 3 {
+                // most bucket fails
+                get_object_rule.then_error(|| {
+                    let nsk = aws_sdk_s3::types::error::NoSuchKey::builder()
+                        .message("")
+                        .build();
+                    GetObjectError::NoSuchKey(nsk)
+                })
+            } else {
+                get_object_rule.then_output(|| {
+                    GetObjectOutput::builder()
+                        .body(ByteStream::from_static(b"key_bytes"))
+                        .build()
+                })
+            };
+            rules.push(get_object_rule);
+        }
+    }
+    let rules_ref: Vec<_> = rules.iter().collect();
 
     // Create a mocked client with the rule
     let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, &rules_ref);
