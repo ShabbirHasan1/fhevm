@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO refresh_keygen_reshare(prep_keygen_id, key_id, epoch_id, params_type, otlp_context) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Bytea",
+        {
+          "Custom": {
+            "name": "params_type",
+            "kind": {
+              "Enum": [
+                "Default",
+                "Test"
+              ]
+            }
+          }
+        },
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89414613827e99c2733e7539df53aca5575da589d2dcb099e27549d7a73372cb"
+}

@@ -337,6 +337,60 @@ async fn test_publish_prss_init() -> anyhow::Result<()> {
 #[rstest]
 #[timeout(Duration::from_secs(60))]
 #[tokio::test]
+async fn test_publish_refresh_keygen_reshare() -> anyhow::Result<()> {
+    let mut test_instance = TestInstanceBuilder::db_gw_setup().await?;
+    let cancel_token = CancellationToken::new();
+    let gw_listener_task = start_test_listener(&test_instance, cancel_token.clone(), None);
+
+    // Wait for gw-listener to be ready + 2 anvil blocks
+    test_instance
+        .wait_for_log("Waiting for next RefreshKeygenReshare...")
+        .await;
+    tokio::time::sleep(2 * test_instance.anvil_block_time()).await;
+
+    info!("Mocking RefreshKeygenReshare on Anvil...");
+    let rand_key_id = rand_u256();
+    let pending_tx = test_instance
+        .kms_generation_contract()
+        .refreshKeygenReshare(rand_key_id)
+        .send()
+        .await?;
+    let receipt = pending_tx.get_receipt().await?;
+    let _tx = test_instance
+        .provider()
+        .get_transaction_by_hash(receipt.transaction_hash)
+        .await?
+        .unwrap();
+    info!("Tx successfully sent!");
+
+    test_instance
+        .wait_for_log("Event successfully stored in DB!")
+        .await;
+
+    info!("Checking event is stored in DB...");
+    let row = sqlx::query(
+        "SELECT prep_keygen_id, key_id, epoch_id, params_type FROM refresh_keygen_reshare",
+    )
+    .fetch_one(test_instance.db())
+    .await?;
+
+    let prep_keygen_id = U256::from_le_bytes(row.try_get::<[u8; 32], _>("prep_keygen_id")?);
+    let key_id = U256::from_le_bytes(row.try_get::<[u8; 32], _>("key_id")?);
+    let epoch_id = U256::from_le_bytes(row.try_get::<[u8; 32], _>("epoch_id")?);
+    let params_type = row.try_get::<ParamsTypeDb, _>("params_type")?;
+    assert_eq!(prep_keygen_id, PREP_KEY_COUNTER + U256::ONE);
+    assert_eq!(key_id, rand_key_id);
+    assert_eq!(epoch_id, EPOCH_ID_COUNTER + U256::ONE);
+    assert_eq!(params_type, ParamsTypeDb::Default);
+    info!("Event successfully stored! Stopping GatewayListener...");
+
+    cancel_token.cancel();
+    Ok(gw_listener_task?.await?)
+}
+
+#[rstest]
+#[timeout(Duration::from_secs(60))]
+#[tokio::test]
 async fn test_catchup() -> anyhow::Result<()> {
     let mut test_instance = TestInstanceBuilder::db_gw_setup().await?;
     let cancel_token = CancellationToken::new();

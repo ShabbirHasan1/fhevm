@@ -26,6 +26,7 @@ const PREP_KEYGEN_NOTIFICATION: &str = "prep_keygen_request_available";
 const KEYGEN_NOTIFICATION: &str = "keygen_request_available";
 const CRSGEN_NOTIFICATION: &str = "crsgen_request_available";
 const PRSS_INIT_NOTIFICATION: &str = "prss_init_available";
+const REFRESH_KEYGEN_RESHARE_NOTIFICATION: &str = "refresh_keygen_reshare_available";
 
 /// Struct that collects Gateway's events from a `Postgres` database.
 pub struct DbEventPicker {
@@ -82,7 +83,10 @@ impl DbEventPicker {
         self.db_listener.listen(PREP_KEYGEN_NOTIFICATION).await?;
         self.db_listener.listen(KEYGEN_NOTIFICATION).await?;
         self.db_listener.listen(CRSGEN_NOTIFICATION).await?;
-        self.db_listener.listen(PRSS_INIT_NOTIFICATION).await
+        self.db_listener.listen(PRSS_INIT_NOTIFICATION).await?;
+        self.db_listener
+            .listen(REFRESH_KEYGEN_RESHARE_NOTIFICATION)
+            .await
     }
 }
 
@@ -129,6 +133,7 @@ impl DbEventPicker {
             KEYGEN_NOTIFICATION => self.pick_keygen_requests().await,
             CRSGEN_NOTIFICATION => self.pick_crsgen_requests().await,
             PRSS_INIT_NOTIFICATION => self.pick_prss_init().await,
+            REFRESH_KEYGEN_RESHARE_NOTIFICATION => self.pick_refresh_keygen_reshare().await,
             channel => Err(anyhow!("Unexpected notification: {channel}")),
         }
     }
@@ -142,6 +147,7 @@ impl DbEventPicker {
             self.pick_keygen_requests().await,
             self.pick_crsgen_requests().await,
             self.pick_prss_init().await,
+            self.pick_refresh_keygen_reshare().await,
         ]
         .into_iter()
         .for_each(|res| match res {
@@ -282,13 +288,35 @@ impl DbEventPicker {
                     LIMIT 1 FOR UPDATE SKIP LOCKED
                 ) AS req
                 WHERE prss_init.id = req.id
-                RETURNING req.id
+                RETURNING req.id, otlp_context
             ",
         )
         .fetch_all(&self.db_pool)
         .await?
         .iter()
         .map(gw_event::from_prss_init_row)
+        .collect()
+    }
+
+    async fn pick_refresh_keygen_reshare(&self) -> anyhow::Result<Vec<GatewayEvent>> {
+        sqlx::query(
+            "
+                UPDATE refresh_keygen_reshare
+                SET under_process = TRUE
+                FROM (
+                    SELECT key_id
+                    FROM refresh_keygen_reshare
+                    WHERE under_process = FALSE
+                    LIMIT 1 FOR UPDATE SKIP LOCKED
+                ) AS req
+                WHERE refresh_keygen_reshare.key_id = req.key_id
+                RETURNING prep_keygen_id, req.key_id, epoch_id, params_type, otlp_context
+            ",
+        )
+        .fetch_all(&self.db_pool)
+        .await?
+        .iter()
+        .map(gw_event::from_refresh_keygen_reshare_row)
         .collect()
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO prss_init(id) VALUES ($1) ON CONFLICT DO NOTHING",
+  "query": "DELETE FROM refresh_keygen_reshare WHERE key_id = $1",
   "describe": {
     "columns": [],
     "parameters": {
@@ -10,5 +10,5 @@
     },
     "nullable": []
   },
-  "hash": "b4dda0f6b81966ce45870cc605e22981754cbe36628c0f4712bf789f81376df6"
+  "hash": "59b6a00275099f337ce4534342ef425a1be3316f41a71c8d884daac1309981ad"
 }

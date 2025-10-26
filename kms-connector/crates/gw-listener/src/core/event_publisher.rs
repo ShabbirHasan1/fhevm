@@ -10,7 +10,9 @@ use connector_utils::{
 };
 use fhevm_gateway_bindings::{
     decryption::Decryption::{PublicDecryptionRequest, UserDecryptionRequest},
-    kms_generation::KMSGeneration::{CrsgenRequest, KeygenRequest, PrepKeygenRequest},
+    kms_generation::KMSGeneration::{
+        CrsgenRequest, KeygenRequest, PrepKeygenRequest, RefreshKeygenReshare,
+    },
 };
 use sqlx::{Pool, Postgres, postgres::PgQueryResult};
 use tracing::info;
@@ -46,7 +48,10 @@ impl EventPublisher for DbEventPublisher {
             GatewayEventKind::PrepKeygen(e) => self.publish_prep_keygen_request(e, otlp_ctx).await,
             GatewayEventKind::Keygen(e) => self.publish_keygen_request(e, otlp_ctx).await,
             GatewayEventKind::Crsgen(e) => self.publish_crsgen_request(e, otlp_ctx).await,
-            GatewayEventKind::PrssInit(id) => self.publish_prss_init(id).await,
+            GatewayEventKind::PrssInit(id) => self.publish_prss_init(id, otlp_ctx).await,
+            GatewayEventKind::RefreshKeygenReshare(e) => {
+                self.publish_refresh_keygen_reshare(e, otlp_ctx).await
+            }
         }
         .map_err(|err| anyhow!("Failed to publish event: {err}"))?;
 
@@ -166,10 +171,35 @@ impl DbEventPublisher {
         .map_err(anyhow::Error::from)
     }
 
-    async fn publish_prss_init(&self, id: U256) -> anyhow::Result<PgQueryResult> {
+    async fn publish_prss_init(
+        &self,
+        id: U256,
+        otlp_ctx: PropagationContext,
+    ) -> anyhow::Result<PgQueryResult> {
         sqlx::query!(
-            "INSERT INTO prss_init(id) VALUES ($1) ON CONFLICT DO NOTHING",
+            "INSERT INTO prss_init(id, otlp_context) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             id.as_le_slice(),
+            bc2wrap::serialize(&otlp_ctx)?,
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(anyhow::Error::from)
+    }
+
+    async fn publish_refresh_keygen_reshare(
+        &self,
+        request: RefreshKeygenReshare,
+        otlp_ctx: PropagationContext,
+    ) -> anyhow::Result<PgQueryResult> {
+        let params_type: ParamsTypeDb = request.paramsType.try_into()?;
+        sqlx::query!(
+            "INSERT INTO refresh_keygen_reshare(prep_keygen_id, key_id, epoch_id, params_type, otlp_context) \
+            VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+            request.prepKeygenId.as_le_slice(),
+            request.keyId.as_le_slice(),
+            request.epochId.as_le_slice(),
+            params_type as ParamsTypeDb,
+            bc2wrap::serialize(&otlp_ctx)?,
         )
         .execute(&self.db_pool)
         .await
