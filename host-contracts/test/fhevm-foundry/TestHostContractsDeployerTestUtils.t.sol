@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
-import {HostContractsDeployerTestUtils} from "../src/HostContractsDeployerTestUtils.sol";
+import {HostContractsDeployerTestUtils} from "../../fhevm-foundry/HostContractsDeployerTestUtils.sol";
 import {aclAdd, fhevmExecutorAdd, hcuLimitAdd, inputVerifierAdd, kmsVerifierAdd, pauserSetAdd} from "@fhevm-host-contracts/addresses/FHEVMHostAddresses.sol";
 import {ACL} from "@fhevm-host-contracts/contracts/ACL.sol";
 import {FHEVMExecutor} from "@fhevm-host-contracts/contracts/FHEVMExecutor.sol";

@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "encrypted-types/EncryptedTypes.sol";
 import {FHE} from "../lib/FHE.sol";
 import {CoprocessorConfig} from "../lib/Impl.sol";
-import {HostContractsDeployerTestUtils} from "@fhevm-foundry/src/HostContractsDeployerTestUtils.sol";
+import {HostContractsDeployerTestUtils} from "@fhevm-foundry/HostContractsDeployerTestUtils.sol";
 import {ACL} from "@fhevm-host-contracts/contracts/ACL.sol";
 import {aclAdd, fhevmExecutorAdd, kmsVerifierAdd} from "@fhevm-host-contracts/addresses/FHEVMHostAddresses.sol";
 import {decryptionOracleAdd} from "@fhevm-host-contracts/addresses/DecryptionOracleAddress.sol";

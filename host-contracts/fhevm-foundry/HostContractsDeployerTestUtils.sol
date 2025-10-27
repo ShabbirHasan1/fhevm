@@ -40,7 +40,7 @@ abstract contract HostContractsDeployerTestUtils is Test {
         address emptyProxyImplementation = address(new EmptyUUPSProxyACL());
 
         deployCodeTo(
-            "src/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
+            "fhevm-foundry/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
             abi.encode(emptyProxyImplementation, abi.encodeCall(EmptyUUPSProxyACL.initialize, (owner))),
             aclAdd
         );
@@ -61,7 +61,7 @@ abstract contract HostContractsDeployerTestUtils is Test {
         address emptyProxyImplementation = address(new EmptyUUPSProxy());
 
         deployCodeTo(
-            "src/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
+            "fhevm-foundry/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
             abi.encode(emptyProxyImplementation, abi.encodeCall(EmptyUUPSProxy.initialize, ())),
             fhevmExecutorAdd
         );
@@ -89,7 +89,7 @@ abstract contract HostContractsDeployerTestUtils is Test {
         address emptyProxyImplementation = address(new EmptyUUPSProxy());
 
         deployCodeTo(
-            "src/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
+            "fhevm-foundry/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
             abi.encode(emptyProxyImplementation, abi.encodeCall(EmptyUUPSProxy.initialize, ())),
             kmsVerifierAdd
         );
@@ -120,7 +120,7 @@ abstract contract HostContractsDeployerTestUtils is Test {
         address emptyProxyImplementation = address(new EmptyUUPSProxy());
 
         deployCodeTo(
-            "src/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
+            "fhevm-foundry/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
             abi.encode(emptyProxyImplementation, abi.encodeCall(EmptyUUPSProxy.initialize, ())),
             inputVerifierAdd
         );
@@ -145,7 +145,7 @@ abstract contract HostContractsDeployerTestUtils is Test {
         address emptyProxyImplementation = address(new EmptyUUPSProxy());
 
         deployCodeTo(
-                "src/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
+            "fhevm-foundry/HostContractsDeployerTestUtils.sol:DeployableERC1967Proxy",
             abi.encode(emptyProxyImplementation, abi.encodeCall(EmptyUUPSProxy.initialize, ())),
             hcuLimitAdd
         );

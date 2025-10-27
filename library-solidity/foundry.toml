@@ -8,8 +8,5 @@ allow_paths = ['../']
 
 remappings = [
     '@fhevm-host-contracts/=../host-contracts/',
-    '@fhevm-foundry/=../fhevm-foundry/',
-    'forge-std/=../fhevm-foundry/dependencies/forge-std-1.11.0/src/',
-    '@openzeppelin/contracts/=../fhevm-foundry/dependencies/@openzeppelin-contracts-5.1.0/',
-    '@openzeppelin/contracts-upgradeable/=../fhevm-foundry/dependencies/@openzeppelin-contracts-upgradeable-5.1.0/'
+    '@fhevm-foundry/=../host-contracts/fhevm-foundry/',
 ]
