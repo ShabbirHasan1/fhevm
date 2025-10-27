@@ -55,8 +55,9 @@ jobs:
       - name: Generate DecryptionOracle address
         run: |
           cd host-contracts
+          DOTENV_CONFIG_PATH=.env.example HARDHAT_NETWORK=hardhat npx hardhat compile:specific --contract decryptionOracle
           DOTENV_CONFIG_PATH=.env.example HARDHAT_NETWORK=hardhat npx hardhat task:deployDecryptionOracle
       - run: cp ./library-solidity/.env.example ./library-solidity/.env
       - run: npm --workspace=library-solidity ci --include=optional
       - name: "Run forge tests"
-        run: "cd library-solidity && forge install foundry-rs/forge-std && forge test"
+        run: "cd library-solidity && forge install foundry-rs/forge-std --no-commit && forge test"
