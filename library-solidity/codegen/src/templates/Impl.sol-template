@@ -156,6 +156,40 @@ interface IACL {
      * @return isDecryptable    Whether the handle can be publicly decrypted.
      */
     function isAllowedForDecryption(bytes32 handle) external view returns (bool);
+
+    /**
+     * @notice              Returns whether the account is persistently allowed to use the handle.
+     * @param handle        Handle.
+     * @param account       Address of the account.
+     */
+    function persistAllowed(bytes32 handle, address account) external view returns (bool);
+
+    /**
+     * @notice              Delegates user decryption rights to `delegate` for the specified `contractAddress`.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     * @param expirationDate UNIX timestamp when the delegation expires.
+     */
+    function delegateForUserDecryption(address delegate, address contractAddress, uint64 expirationDate) external;
+
+    /**
+     * @notice              Revokes previously delegated user decryption rights.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     */
+    function revokeDelegationForUserDecryption(address delegate, address contractAddress) external;
+
+    /**
+     * @notice              Returns the expiration date for delegated user decryption rights.
+     * @param delegator     The delegator account.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     */
+    function getUserDecryptionDelegationExpirationDate(
+        address delegator,
+        address delegate,
+        address contractAddress
+    ) external view returns (uint64);
 }
 
 /**
@@ -351,5 +385,53 @@ library Impl {
     function isPubliclyDecryptable(bytes32 handle) internal view returns (bool) {
         CoprocessorConfig storage $ = getCoprocessorConfig();
         return IACL($.ACLAddress).isAllowedForDecryption(handle);
+    }
+
+    /**
+     * @notice              Returns whether the account is persistently allowed to use the handle.
+     * @param handle        Handle.
+     * @param account       Address of the account.
+     * @return isAllowed    Whether the account can access the handle persistently.
+     */
+    function persistAllowed(bytes32 handle, address account) internal view returns (bool) {
+        CoprocessorConfig storage $ = getCoprocessorConfig();
+        return IACL($.ACLAddress).persistAllowed(handle, account);
+    }
+
+    /**
+     * @notice              Delegates user decryption rights to `delegate` for the specified `contractAddress`.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     * @param expirationDate UNIX timestamp when the delegation expires.
+     */
+    function delegateForUserDecryption(address delegate, address contractAddress, uint64 expirationDate) internal {
+        CoprocessorConfig storage $ = getCoprocessorConfig();
+        IACL($.ACLAddress).delegateForUserDecryption(delegate, contractAddress, expirationDate);
+    }
+
+    /**
+     * @notice              Revokes previously delegated user decryption rights.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     */
+    function revokeDelegationForUserDecryption(address delegate, address contractAddress) internal {
+        CoprocessorConfig storage $ = getCoprocessorConfig();
+        IACL($.ACLAddress).revokeDelegationForUserDecryption(delegate, contractAddress);
+    }
+
+    /**
+     * @notice              Returns the expiration date for delegated user decryption rights.
+     * @param delegator     The delegator account.
+     * @param delegate      The delegate account.
+     * @param contractAddress The contract address forming the user decryption context.
+     * @return expirationDate The UNIX timestamp when the delegation expires.
+     */
+    function getUserDecryptionDelegationExpirationDate(
+        address delegator,
+        address delegate,
+        address contractAddress
+    ) internal view returns (uint64) {
+        CoprocessorConfig storage $ = getCoprocessorConfig();
+        return IACL($.ACLAddress).getUserDecryptionDelegationExpirationDate(delegator, delegate, contractAddress);
     }
 }
