@@ -266,7 +266,9 @@ impl DFTxGraph {
         edges: &Dag<(), TxEdge>,
     ) -> Result<()> {
         if let Some(producer) = self.allowed_map.get(handle).cloned() {
+            let mut save_result = true;
             if let Ok(ref result) = result {
+                save_result = result.3;
                 // Traverse immediate dependents and add this result as an input
                 for edge in edges.edges_directed(producer, Direction::Outgoing) {
                     let dependent_tx_index = edge.target();
@@ -277,7 +279,7 @@ impl DFTxGraph {
                     dependent_tx
                         .inputs
                         .entry(handle.to_vec())
-                        .and_modify(|v| *v = Some(DFGTxInput::Value(result.0.clone())));
+                        .and_modify(|v| *v = Some(DFGTxInput::Value((result.0.clone(), result.3))));
                 }
             } else {
                 // If this result was an error, mark this transaction
@@ -287,11 +289,6 @@ impl DFTxGraph {
             }
             // Finally add the output (either error or compressed
             // ciphertext) to the graph's outputs
-            let save_result = if let Ok(ref res) = result {
-                res.3
-            } else {
-                true
-            };
             if save_result {
                 let producer_tx = self
                     .graph
@@ -391,7 +388,7 @@ impl OpNode {
                 let DFGTaskInput::Dependence(d) = i else {
                     return false;
                 };
-                let Some(Some(DFGTxInput::Value(val))) = ct_map.get(d) else {
+                let Some(Some(DFGTxInput::Value((val, _)))) = ct_map.get(d) else {
                     return false;
                 };
                 *i = DFGTaskInput::Value(val.clone());

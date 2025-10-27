@@ -423,7 +423,7 @@ async fn build_transaction_graph_and_execute<'a>(
     for (handle, (ct_type, mut ct)) in ciphertext_map.into_iter() {
         tx_graph.add_input(
             &handle,
-            &DFGTxInput::Compressed((ct_type, std::mem::take(&mut ct))),
+            &DFGTxInput::Compressed(((ct_type, std::mem::take(&mut ct)), true)),
         )?;
     }
     // Execute the DFG with the current tenant's keys
