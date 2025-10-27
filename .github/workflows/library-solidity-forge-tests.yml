@@ -50,6 +50,8 @@ jobs:
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
         with:
           node-version: ${{ matrix.node-version }}
+      - run: npm --workspace=host-contracts ci --include=optional
+      - run: make -C host-contracts ensure-addresses
       - run: cp ./library-solidity/.env.example ./library-solidity/.env
       - run: npm --workspace=library-solidity ci --include=optional
       - name: "Run forge tests"
