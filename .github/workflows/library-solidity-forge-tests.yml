@@ -52,6 +52,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - run: npm --workspace=host-contracts ci --include=optional
       - run: make -C host-contracts ensure-addresses
+      - name: Generate DecryptionOracle address
+        run: |
+          cd host-contracts
+          DOTENV_CONFIG_PATH=.env.example HARDHAT_NETWORK=hardhat npx hardhat task:deployDecryptionOracle
       - run: cp ./library-solidity/.env.example ./library-solidity/.env
       - run: npm --workspace=library-solidity ci --include=optional
       - name: "Run forge tests"
